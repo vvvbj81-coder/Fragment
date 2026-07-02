@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TON Wallet Migrate — перенос между своими кошельками</title>
+<script src="https://cdn.jsdelivr.net/npm/@tonconnect/ui@2.0.9/dist/tonconnect-ui.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0d10;
+    --panel:#14171c;
+    --panel-border:#242830;
+    --text:#e8eaed;
+    --muted:#8b929e;
+    --accent:#4fb5ea;
+    --accent-dim:#245a72;
+    --danger:#e0616b;
+    --mono:'SF Mono','Consolas','Menlo',monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    padding:24px 16px 60px;
+  }
+  .wrap{max-width:560px;margin:0 auto;}
+  h1{font-size:20px;font-weight:600;margin:0 0 4px;}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 24px;}
+  .panel{background:var(--panel);border:1px solid var(--panel-border);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;}
+  .addr{font-family:var(--mono);font-size:13px;word-break:break-all;}
+  button{
+    background:var(--accent);color:#061520;border:none;border-radius:8px;
+    padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;
+    transition:opacity .15s;width:100%;
+  }
+  button:hover{opacity:.88;}
+  button:disabled{background:#3a3f47;color:#7b818c;cursor:not-allowed;}
+  button.secondary{background:transparent;border:1px solid var(--panel-border);color:var(--text);}
+  input{
+    width:100%;background:#0d0f13;border:1px solid var(--panel-border);border-radius:8px;
+    padding:10px 12px;color:var(--text);font-family:var(--mono);font-size:13px;margin-top:4px;
+  }
+  input:focus{outline:none;border-color:var(--accent-dim);}
+  .token{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--panel-border);font-size:14px;}
+  .token:last-child{border-bottom:none;}
+  .token-sym{font-weight:600;}
+  .token-bal{color:var(--muted);font-family:var(--mono);font-size:13px;}
+  .status{font-size:12px;padding:8px 10px;border-radius:6px;margin-top:10px;font-family:var(--mono);display:none;}
+  .status.show{display:block;}
+  .status.ok{background:rgba(79,181,234,.08);color:var(--accent);border:1px solid rgba(79,181,234,.2);}
+  .status.err{background:rgba(224,97,107,.08);color:var(--danger);border:1px solid rgba(224,97,107,.2);}
+  .status.pending{background:rgba(139,146,158,.08);color:var(--muted);border:1px solid var(--panel-border);}
+  .warn{font-size:12px;color:var(--muted);line-height:1.5;margin-top:14px;}
+  .hidden{display:none;}
+  #tc-connect-wrap{display:flex;justify-content:center;}
+  .small-btn{width:auto;padding:6px 10px;font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TON Wallet Migrate</h1>
+  <p class="sub">Перенос TON и жетонов между твоими кошельками через Tonkeeper (TON Connect). Ключи остаются в приложении кошелька.</p>
+
+  <div class="panel">
+    <div id="tc-connect-wrap"></div>
+  </div>
+
+  <div id="mainPanel" class="hidden">
+    <div class="panel">
+      <div class="label">Подключен (источник)</div>
+      <div class="addr" id="sourceAddr">—</div>
+      <div class="label" style="margin-top:12px;">Баланс TON</div>
+      <div class="addr" id="tonBalance">—</div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Адрес назначения (твой второй кошелёк)</div>
+      <input id="destAddr" placeholder="EQ... или UQ...">
+    </div>
+
+    <div class="panel">
+      <div class="row" style="margin-bottom:10px;">
+        <div class="label" style="margin:0;">Сумма перевода</div>
+        <button class="secondary small-btn" id="maxBtn">Максимум (с резервом на газ)</button>
+      </div>
+      <input id="amountTon" placeholder="0.0" inputmode="decimal">
+    </div>
+
+    <div class="panel">
+      <button id="sendBtn">Перевести TON</button>
+      <div class="status" id="statusBox"></div>
+    </div>
+
+    <p class="warn">
+      Перед подтверждением в Tonkeeper всегда проверяй адрес получателя и сумму — это финальная точка контроля.
+      Комиссия сети TON обычно небольшая (доли TON), резерв на газ ставится автоматически при "Максимум".
+      Жетоны (USDT-TON и т.п.) здесь не переводятся — только нативный TON.
+    </p>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+if (typeof TON_CONNECT_UI === 'undefined') {
+  document.getElementById('tc-connect-wrap').innerHTML =
+    '<div style="color:#e0616b;font-size:13px;text-align:center;">' +
+    'Не удалось загрузить библиотеку TonConnect с CDN.<br>' +
+    'Проверь интернет-соединение или попробуй открыть страницу заново.' +
+    '</div>';
+  throw new Error('TON_CONNECT_UI failed to load from CDN');
+}
+
+const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+  manifestUrl: window.location.origin + window.location.pathname.replace(/[^/]*$/, '') + 'tonconnect-manifest.json',
+  buttonRootId: 'tc-connect-wrap'
+});
+let currentAddr = null;
+let currentBalanceNano = 0n;
+
+const TONCENTER_API = "https://toncenter.com/api/v2";
+
+function toRawFriendly(addr) {
+  // TonConnect отдаёт адрес в raw формате (0:hex...), для API это ок
+  return addr;
+}
+
+async function fetchBalance(addr) {
+  const res = await fetch(`${TONCENTER_API}/getAddressBalance?address=${addr}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error("Не удалось получить баланс");
+  return BigInt(data.result);
+}
+
+function nanoToTon(nano) {
+  const s = nano.toString().padStart(10, '0');
+  const intPart = s.slice(0, -9) || '0';
+  const fracPart = s.slice(-9);
+  return `${intPart}.${fracPart}`.replace(/0+$/, '').replace(/\.$/, '.0');
+}
+
+function tonToNano(tonStr) {
+  const [intPart, fracPart = ''] = tonStr.split('.');
+  const fracPadded = (fracPart + '000000000').slice(0, 9);
+  return BigInt(intPart || '0') * 1000000000n + BigInt(fracPadded || '0');
+}
+
+function showStatus(msg, type) {
+  const box = $("statusBox");
+  box.textContent = msg;
+  box.className = "status show " + type;
+}
+
+async function onWalletConnected(wallet) {
+  currentAddr = wallet.account.address;
+  $("mainPanel").classList.remove("hidden");
+  $("sourceAddr").textContent = currentAddr;
+  await refreshBalance();
+}
+
+async function refreshBalance() {
+  try {
+    currentBalanceNano = await fetchBalance(currentAddr);
+    $("tonBalance").textContent = nanoToTon(currentBalanceNano) + " TON";
+  } catch (e) {
+    $("tonBalance").textContent = "ошибка загрузки";
+    console.error(e);
+  }
+}
+
+tonConnectUI.onStatusChange((wallet) => {
+  if (wallet) {
+    onWalletConnected(wallet);
+  } else {
+    currentAddr = null;
+    $("mainPanel").classList.add("hidden");
+  }
+});
+
+$("maxBtn").addEventListener("click", () => {
+  const RESERVE_NANO = 50000000n; // 0.05 TON резерв на газ
+  const spendable = currentBalanceNano > RESERVE_NANO ? currentBalanceNano - RESERVE_NANO : 0n;
+  $("amountTon").value = nanoToTon(spendable);
+});
+
+$("sendBtn").addEventListener("click", async () => {
+  try {
+    const dest = $("destAddr").value.trim();
+    if (!dest) { showStatus("Укажи адрес назначения", "err"); return; }
+    const amountStr = $("amountTon").value.trim();
+    if (!amountStr || Number(amountStr) <= 0) { showStatus("Укажи сумму", "err"); return; }
+
+    const amountNano = tonToNano(amountStr);
+    if (amountNano > currentBalanceNano) { showStatus("Недостаточно средств", "err"); return; }
+
+    $("sendBtn").disabled = true;
+    showStatus("Ожидаю подтверждения в Tonkeeper...", "pending");
+
+    const tx = {
+      validUntil: Math.floor(Date.now() / 1000) + 300,
+      messages: [
+        {
+          address: dest,
+          amount: amountNano.toString()
+        }
+      ]
+    };
+
+    await tonConnectUI.sendTransaction(tx);
+    showStatus("Транзакция отправлена. Обновляю баланс через пару секунд...", "ok");
+    setTimeout(refreshBalance, 5000);
+  } catch (e) {
+    console.error(e);
+    showStatus("Ошибка: " + (e.message || e), "err");
+  } finally {
+    $("sendBtn").disabled = false;
+  }
+});
+</script>
+</body>
+</html>
